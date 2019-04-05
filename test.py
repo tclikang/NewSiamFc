@@ -8,8 +8,6 @@ from parameters import param
 import torch
 
 if __name__ == '__main__':
-    # 新加入一句话
-    # weishenme tuiocng bushang
     # setup tracker
     net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
     tracker = TrackerSiamFC(net_path=net_path)
