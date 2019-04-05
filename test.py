@@ -9,7 +9,6 @@ import torch
 
 if __name__ == '__main__':
     # setup tracker
-    # 测试合并分值
     net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
     tracker = TrackerSiamFC(net_path=net_path)
     # load net
