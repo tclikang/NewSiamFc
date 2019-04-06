@@ -6,7 +6,7 @@ import time
 def showbb(img, boundingbox):
     #img 是一种numpy格式的图像
     x,y,w,h = boundingbox
-    cv2.rectangle(img, (int(x),int(y)),(int(x+w), int(y+h)), (255,0,0))
+    cv2.rectangle(img, (int(x),int(y)),(int(x+w), int(y+h)), (0,0,255))
     showimg(img)
 
 # 画图像
