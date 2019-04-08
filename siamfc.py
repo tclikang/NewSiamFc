@@ -141,7 +141,7 @@ class TrackerSiamFC(Tracker):
 
         # setup optimizer
         self.optimizer = optim.SGD(
-            self.net.parameters(),
+            self.net.deconv.parameters(),
             lr=self.cfg.initial_lr,  # self.cfg.initial_lr = 0.01
             weight_decay=self.cfg.weight_decay,  # self.cfg.weight_decay = 0.0005
             momentum=self.cfg.momentum)  # self.cfg.momentum = 0.9

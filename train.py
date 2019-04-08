@@ -12,7 +12,7 @@ from parameters import param
 import utils
 
 if __name__ == '__main__':
-    # setup dataset333
+    # setup dataset
     para = param()
     name = 'GOT-10k'
     assert name in ['VID', 'GOT-10k']
@@ -35,22 +35,19 @@ if __name__ == '__main__':
 
     # path for saving checkpoints
     net_dir_total = 'pretrained/siamfc_new/'
+    net_dir_pretrain = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc/model.pth'
     if not os.path.exists(net_dir_total):
         os.makedirs(net_dir_total)
+    # 读取预训练的网络
+    pretrained_dict = torch.load(net_dir_pretrain)
+    my_model_dict = tracker.net.state_dict()
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in my_model_dict}
+    my_model_dict.update(pretrained_dict)
+    tracker.net.load_state_dict(my_model_dict)
 
-    # # 读取训练数据
-    # if len(os.listdir(net_dir_feature)) > 0:  # 文件夹不为空
-    #     model_list = os.listdir(para.model_save_path)
-    #     model_list.sort()
-    #     model_path = para.model_save_path + model_list[-1]
-    #     tracker.net.load_state_dict(torch.load(model_path))
-    #     for name in model_list:
-    #         file_name = os.path.join(para.model_save_path, name)
-    #         os.remove(file_name)
-    #     torch.save(tracker.net.state_dict(), '{}0.pkl'.format(para.model_save_path))
-
+    # 仅仅初始化deconv
     save_path = net_dir_total
-    utils.read_net(net_dir_total, tracker.net)
+    utils.read_net(net_dir_total, tracker.net.deconv)
 
     epoch_num = 50
     for epoch in range(epoch_num):
@@ -64,5 +61,5 @@ if __name__ == '__main__':
 
                 # save checkpoint
             if step % 2000 == 0:
-                torch.save(tracker.net.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path,epoch,step))
+                torch.save(tracker.net.deconv.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path,epoch,step))
 
