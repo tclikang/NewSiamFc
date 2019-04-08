@@ -11,6 +11,16 @@ from siamfc import TrackerSiamFC
 from parameters import param
 import utils
 
+# 将file_path中的预训练模型读入net
+def load_pre_train_mode(net, file_path):
+    # 读取预训练的网络
+    pretrained_dict = torch.load(file_path)
+    my_model_dict = net.state_dict()
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in my_model_dict}
+    my_model_dict.update(pretrained_dict)
+    net.load_state_dict(my_model_dict)
+
+
 if __name__ == '__main__':
     # setup dataset
     para = param()
@@ -38,12 +48,8 @@ if __name__ == '__main__':
     net_dir_pretrain = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc/model.pth'
     if not os.path.exists(net_dir_total):
         os.makedirs(net_dir_total)
-    # 读取预训练的网络
-    pretrained_dict = torch.load(net_dir_pretrain)
-    my_model_dict = tracker.net.state_dict()
-    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in my_model_dict}
-    my_model_dict.update(pretrained_dict)
-    tracker.net.load_state_dict(my_model_dict)
+
+    load_pre_train_mode(tracker.net, net_dir_pretrain)
 
     # 仅仅初始化deconv
     save_path = net_dir_total
