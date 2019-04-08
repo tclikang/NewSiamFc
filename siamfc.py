@@ -19,9 +19,41 @@ import numpy as np
 from imageprocess import showbb
 from parameters import param
 
+
+def parse_args(**kargs):
+    # default parameters
+    cfg = {
+        # inference parameters
+        'exemplar_sz': 127,
+        'instance_sz': 255,
+        'context': 0.5,
+        'scale_num': 3,
+        'scale_step': 1.0375,
+        'scale_lr': 0.59,
+        'scale_penalty': 0.9745,
+        'window_influence': 0.176,
+        'response_sz': 17,
+        'response_up': 16,
+        'total_stride': 8,
+        'adjust_scale': 0.001,  # 0.001 default
+        # train parameters
+        'initial_lr': 0.01,  # 0.01 default
+        'lr_decay': 0.8685113737513527,
+        'weight_decay': 5e-4,
+        'momentum': 0.9,
+        'r_pos': 16,
+        'r_neg': 0,
+        'prior_frames_num': 13}
+
+    for key, val in kargs.items():
+        if key in cfg:
+            cfg.update({key: val})
+    return namedtuple('GenericDict', cfg.keys())(**cfg)
+
+
 class SiamFC(nn.Module):
 
-    def __init__(self):
+    def __init__(self, **kargs):
         super(SiamFC, self).__init__()
         # 这里讲一下conv2中的group参数
         # 假设当前的输入channel数为8， 输出为12，卷积核大小为3，
@@ -31,6 +63,7 @@ class SiamFC(nn.Module):
         # self.feature[4].weight.data.shape = torch.Size([256, 48, 5, 5])
         # setup GPU device if available
         self.cuda = torch.cuda.is_available()
+        self.cfg = parse_args(**kargs)
         self.device = torch.device('cuda:0' if self.cuda else 'cpu')
         self.para = param()
         self.feature = nn.Sequential(
@@ -84,7 +117,7 @@ class SiamFC(nn.Module):
         out = out.view(n, 1, out.size(-2), out.size(-1))
 
         # adjust the scale of responses
-        response17 = 0.001 * out + 0.0
+        response17 = self.cfg.adjust_scale * out + 0.0
         # z_feat_deconv 是127的特征图,6*6*256大小的
         # x_target_feat 是127特征图,是14帧的目标区域
         # response17是卷积后的特征图
@@ -126,7 +159,7 @@ class TrackerSiamFC(Tracker):
     def __init__(self, net_path=None,**kargs):
         super(TrackerSiamFC, self).__init__(
             name='SiamFC', is_deterministic=True)
-        self.cfg = self.parse_args(**kargs)
+        self.cfg = parse_args(**kargs)
         self.para = param()
         # setup GPU device if available
         self.cuda = torch.cuda.is_available()
@@ -152,38 +185,6 @@ class TrackerSiamFC(Tracker):
 
         self.lr_scheduler = ExponentialLR(
             self.optimizer, gamma=self.cfg.lr_decay)
-
-
-
-    def parse_args(self, **kargs):
-        # default parameters
-        cfg = {
-            # inference parameters
-            'exemplar_sz': 127,
-            'instance_sz': 255,
-            'context': 0.5,
-            'scale_num': 3,
-            'scale_step': 1.0375,
-            'scale_lr': 0.59,
-            'scale_penalty': 0.9745,
-            'window_influence': 0.176,
-            'response_sz': 17,
-            'response_up': 16,
-            'total_stride': 8,
-            'adjust_scale': 0.001,
-            # train parameters
-            'initial_lr': 0.001,
-            'lr_decay': 0.8685113737513527,
-            'weight_decay': 5e-4,
-            'momentum': 0.9,
-            'r_pos': 16,
-            'r_neg': 0,
-            'prior_frames_num': 13 }
-
-        for key, val in kargs.items():
-            if key in cfg:
-                cfg.update({key: val})
-        return namedtuple('GenericDict', cfg.keys())(**cfg)
 
     # 当frame=0的时候调用次方法
     def init(self, image, box):
@@ -269,7 +270,7 @@ class TrackerSiamFC(Tracker):
         with torch.set_grad_enabled(False):
             self.net.eval()
             instances = self.net.feature(instance_images)  # 生成instances的embedding
-            responses = F.conv2d(instances, self.kernel)*0.001   # 生成卷积
+            responses = F.conv2d(instances, self.kernel)*self.cfg.adjust_scale   # 生成卷积
         responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
 
         return responses.max()
@@ -317,7 +318,7 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(0)
+        self.exemplar_image_seq.pop(1)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):
@@ -348,7 +349,7 @@ class TrackerSiamFC(Tracker):
         with torch.set_grad_enabled(False):
             self.net.eval()
             instances = self.net.feature(instance_images)  # 生成instances的embedding
-            responses = F.conv2d(instances, self.kernel) * 0.001  # 生成卷积
+            responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
         responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
         # 提取当前响应图的最大值
         max_response = responses.max()
