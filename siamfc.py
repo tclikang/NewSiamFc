@@ -141,7 +141,7 @@ class TrackerSiamFC(Tracker):
 
         # setup optimizer
         self.optimizer = optim.SGD(
-            self.net.deconv.parameters(),
+            self.net.parameters(),
             lr=self.cfg.initial_lr,  # self.cfg.initial_lr = 0.01
             weight_decay=self.cfg.weight_decay,  # self.cfg.weight_decay = 0.0005
             momentum=self.cfg.momentum)  # self.cfg.momentum = 0.9
@@ -172,7 +172,7 @@ class TrackerSiamFC(Tracker):
             'total_stride': 8,
             'adjust_scale': 0.001,
             # train parameters
-            'initial_lr': 0.01,
+            'initial_lr': 0.001,
             'lr_decay': 0.8685113737513527,
             'weight_decay': 5e-4,
             'momentum': 0.9,
@@ -317,7 +317,7 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(1)
+        self.exemplar_image_seq.pop(0)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):
@@ -413,11 +413,13 @@ class TrackerSiamFC(Tracker):
 
         ################# 更新self.kernel ####################
         # 根据已跟踪到的box,求出这个box的
-        if max_response > self.max_response_first_frame * self.para.update_template_threshold:
-            self.update_kernel(image, box)
-            # print('update-----',box)
+        # if max_response < self.max_response_first_frame * self.para.update_template_threshold:
+        #     pass
+        self.update_kernel(image, box)
+        print('update-----max_response:{}, max_response_first_frame:{}'.
+                  format(max_response, self.max_response_first_frame))
 
-        # showbb(img_to_show, box)
+        showbb(img_to_show, box)
         return box
 
     def step(self, batch, backward=True, update_lr=False):

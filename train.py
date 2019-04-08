@@ -49,11 +49,11 @@ if __name__ == '__main__':
     if not os.path.exists(net_dir_total):
         os.makedirs(net_dir_total)
 
-    load_pre_train_mode(tracker.net, net_dir_pretrain)
+    # load_pre_train_mode(tracker.net, net_dir_pretrain)
 
-    # 仅仅初始化deconv
+    # 初始化整体网络
     save_path = net_dir_total
-    utils.read_net(net_dir_total, tracker.net.deconv)
+    utils.read_net(net_dir_total, tracker.net)
 
     epoch_num = 50
     for epoch in range(epoch_num):
@@ -67,5 +67,5 @@ if __name__ == '__main__':
 
                 # save checkpoint
             if step % 2000 == 0:
-                torch.save(tracker.net.deconv.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path,epoch,step))
+                torch.save(tracker.net.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path,epoch,step))
 

@@ -11,18 +11,18 @@ import utils
 
 if __name__ == '__main__':
     # setup tracker
-    net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
+    # net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
     net_pretrain_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc/model.pth'
     para = param()
     tracker = TrackerSiamFC()
     # load net
-    load_pre_train_mode(tracker.net, net_pretrain_path)  # load pretrain model
+    # load_pre_train_mode(tracker.net, net_pretrain_path)  # load pretrain model
     # loading my train model
     if len(os.listdir(para.model_save_path)) > 0:  # 文件夹不为空
         model_list = os.listdir(para.model_save_path)
         model_list.sort()
         model_path = para.model_save_path + model_list[-1]
-        tracker.net.deconv.load_state_dict(torch.load(model_path))
+        tracker.net.load_state_dict(torch.load(model_path))
 
 
     # setup experiments
