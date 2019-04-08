@@ -12,7 +12,7 @@ from parameters import param
 import utils
 
 if __name__ == '__main__':
-    # setup dataset
+    # setup dataset333
     para = param()
     name = 'GOT-10k'
     assert name in ['VID', 'GOT-10k']

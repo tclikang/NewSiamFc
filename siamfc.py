@@ -59,6 +59,7 @@ class SiamFC(nn.Module):
 
 
     # seq_z是保存这13个用于帧序列的图像,是一个list,每个
+    # 已经重新验证,无误
     def lk_forward(self, z_seq, x_target, x_search):
         z_feat_cat = None
         for z in z_seq:
@@ -243,7 +244,8 @@ class TrackerSiamFC(Tracker):
             self.kernel = self.cal_z_seq_feat(self.exemplar_image_seq)
         self.last_kernel = self.kernel
 
-        # 计算第一帧的17*17的特征图的最大值
+        # 计算第一帧的17*17的特征图的最大值,此时的response是没有进行归一化的,也就是没有减
+        # 去最小值的那种归一化
         # 读取第一张图片
         first_frame_response_map = self.cal_first_frame_17_response_map(image)
         self.max_response_first_frame = first_frame_response_map.max()
@@ -323,6 +325,7 @@ class TrackerSiamFC(Tracker):
             # self.kernel = self.net.feature(exemplar_image)
             self.kernel = self.cal_z_seq_feat(self.exemplar_image_seq)*(1-self.para.kernel_lr) + \
                           self.para.kernel_lr*self.last_kernel
+            self.last_kernel = self.kernel
 
 
     # 当frame不等于第一帧时调用这个
@@ -414,7 +417,7 @@ class TrackerSiamFC(Tracker):
             self.update_kernel(image, box)
             # print('update-----',box)
 
-        showbb(img_to_show, box)
+        # showbb(img_to_show, box)
         return box
 
     def step(self, batch, backward=True, update_lr=False):
@@ -447,7 +450,7 @@ class TrackerSiamFC(Tracker):
             labels, weights = self._create_labels(response17.size())
             loss_cross_entropy = F.binary_cross_entropy_with_logits(
                 response17, labels, weight=weights, size_average=True)
-            loss_feat_regression = F.mse_loss(z_deconv, x_target_feat)
+            loss_feat_regression = F.smooth_l1_loss(z_deconv, x_target_feat)
 
             total_loss = self.para.class_weight*loss_cross_entropy + \
                          self.para.regression_loss_weight * loss_feat_regression
