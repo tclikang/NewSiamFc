@@ -12,7 +12,7 @@ import utils
 if __name__ == '__main__':
     # setup tracker
     # net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
-    net_pretrain_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc/model.pth'
+    net_pretrain_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
     para = param()
     tracker = TrackerSiamFC()
     # load net

@@ -318,7 +318,7 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(1)
+        self.exemplar_image_seq.pop(0)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):

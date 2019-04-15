@@ -4,5 +4,5 @@ class param:
         self.regression_loss_weight = 1
         self.class_weight = 1
         self.model_save_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new/'
-        self.kernel_lr = 0.95  # .85有助于避开相似物体 0.95有助于应对形变
+        self.kernel_lr = 0.99  # 0.99 is the best
         self.update_template_threshold = 0.75  # 当前响应图占第一帧响应图最大值的75%,才更新
