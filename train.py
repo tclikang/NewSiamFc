@@ -53,10 +53,11 @@ if __name__ == '__main__':
 
     # 初始化整体网络
     save_path = net_dir_total
-    utils.read_net(net_dir_total, tracker.net, tracker.optimizer)
+    epoch = utils.read_net(net_dir_total, tracker.net, tracker.optimizer)
 
     epoch_num = 50
-    for epoch in range(epoch_num):
+
+    while epoch < epoch_num:
         for step, batch in enumerate(loader):
             loss = tracker.step(
                 batch, backward=True, update_lr=(step == 0))
@@ -66,10 +67,10 @@ if __name__ == '__main__':
                 sys.stdout.flush()
 
                 # save checkpoint
-            if step % 20 == 0:
-                utils.save_model(epoch, tracker.net, tracker.optimizer, save_path, step)
+            # if step % 20 == 0:
+        utils.save_model(epoch, tracker.net, tracker.optimizer, save_path, step)
                 # torch.save({'epoch': epoch+1,
                 #             'state_dict': tracker.net.state_dict(),
                 #             'optimizer': tracker.optimizer.state_dict()},
                 #     '{}E{:0>2d}S{:0>10}.pkl'.format(save_path, epoch, step))
-
+        epoch = epoch + 1

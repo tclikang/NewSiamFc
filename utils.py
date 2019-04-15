@@ -24,6 +24,9 @@ def read_net(filepath, net, optimizer):
             file_name = os.path.join(filepath, name)
             os.remove(file_name)
         save_model(0, net, optimizer, filepath, 0)
+        return loaded_model['epoch']
+    else:
+        return 0
         # torch.save(net.state_dict(), '{}0.pkl'.format(filepath))
 
 def save_model(epoch, net, optimizer, save_path, step):
