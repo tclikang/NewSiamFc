@@ -329,6 +329,40 @@ class TrackerSiamFC(Tracker):
             self.last_kernel = self.kernel
 
 
+    # instance_feature size is [3 256 22 22] 包含三种尺度
+    # kernel size is [1 256 6 6]
+    def calculate_response(self, instance_feature, kernel):
+        feature17_17 = F.conv2d(instance_feature, kernel) * self.cfg.adjust_scale  # 生成卷积
+        def create_label():
+            labels = torch.ones_like(feature17_17)
+            return labels
+        labels = create_label()
+
+        def sigmoid(x):
+            return (1 + (-x).exp()).reciprocal()
+
+        def binary_cross_entropy(input, y):
+            return -(input.log() * y + (1 - y) * (1 - input).log())
+        sigmoid_feature_17_17 = sigmoid(feature17_17)
+        binary_loss = binary_cross_entropy(sigmoid_feature_17_17, labels)
+        l1_loss = torch.ones_like(binary_loss)
+        # -----------------------create l1-smooth loss
+        def l1_smooth_loss_feature_map(instance_feature, kernel):
+            batch_size = instance_feature.shape[0]
+            feature_map_size = instance_feature.shape[2]
+            kernel_size = kernel.shape[2]
+            for i in range(batch_size):
+                for j in range(feature_map_size - kernel_size + 1):
+                    for k in range(feature_map_size - kernel_size + 1):
+                        temp = instance_feature[i, :, j:j+kernel_size, k:k+kernel_size]
+                        loss_feat_regression = F.smooth_l1_loss(kernel, temp)
+                        l1_loss[i, 0, j, k] = loss_feat_regression
+            return l1_loss
+        l1_loss = l1_smooth_loss_feature_map(instance_feature, kernel)
+        response_map = binary_loss + l1_loss
+        return response_map
+
+
     # 当frame不等于第一帧时调用这个
     def update(self, image):
         img_to_show = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)  # 这个是为了用cv2显示用的,并不影响跟踪个结果
@@ -349,13 +383,14 @@ class TrackerSiamFC(Tracker):
         with torch.set_grad_enabled(False):
             self.net.eval()
             instances = self.net.feature(instance_images)  # 生成instances的embedding
-            responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
+            responses = -1 * self.calculate_response(instances, self.kernel).log()  # 因为这里计算的是loss,所以要求的是最小值
+            # responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
         responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
         # 提取当前响应图的最大值
         max_response = responses.max()
 
         # upsample responses and penalize scale changes
-        # self.upscale_sz = 272 将响应图resize到272大小，中间使用三先行插值
+        # self.upscale_sz = 272 将响应图resize到272大小，中间使用三线性插值
         responses = np.stack([cv2.resize(
             t, (self.upscale_sz, self.upscale_sz),
             interpolation=cv2.INTER_CUBIC) for t in responses], axis=0)
@@ -420,7 +455,7 @@ class TrackerSiamFC(Tracker):
         print('update-----max_response:{}, max_response_first_frame:{}'.
                   format(max_response, self.max_response_first_frame))
 
-        # showbb(img_to_show, box)
+        showbb(img_to_show, box)
         return box
 
     def step(self, batch, backward=True, update_lr=False):
