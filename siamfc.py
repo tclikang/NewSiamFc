@@ -452,10 +452,8 @@ class TrackerSiamFC(Tracker):
         # if max_response < self.max_response_first_frame * self.para.update_template_threshold:
         #     pass
         self.update_kernel(image, box)
-        print('update-----max_response:{}, max_response_first_frame:{}'.
-                  format(max_response, self.max_response_first_frame))
 
-        showbb(img_to_show, box)
+        # showbb(img_to_show, box)
         return box
 
     def step(self, batch, backward=True, update_lr=False):
