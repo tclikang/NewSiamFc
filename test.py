@@ -27,10 +27,10 @@ if __name__ == '__main__':
 
     # setup experiments
     experiments = [
-        # ExperimentGOT10k('/home/fanfu/data/GOT-10k', subset='test'),
+        #ExperimentGOT10k('/home/fanfu/data/GOT-10k', subset='test'),
         ExperimentOTB('/home/fanfu/data/OTB', version=2013),
         # ExperimentOTB('/home/fanfu/data/OTB', version=2015),
-        # ExperimentVOT('data/vot2018', version=2018),
+        # ExperimentVOT('/home/fanfu/data/vot2018', version=2018),
         # ExperimentDTB70('data/DTB70'),
         # ExperimentTColor128('data/Temple-color-128'),
         # ExperimentUAV123('data/UAV123', version='UAV123'),

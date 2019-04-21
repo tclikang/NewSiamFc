@@ -18,7 +18,10 @@ from got10k.trackers import Tracker
 import numpy as np
 from imageprocess import showbb
 from parameters import param
+import imageprocess
+import tools
 
+current_frame_id = 1
 
 def parse_args(**kargs):
     # default parameters
@@ -28,10 +31,11 @@ def parse_args(**kargs):
         'instance_sz': 255,
         'context': 0.5,
         'scale_num': 3,
-        'scale_step': 1.0375,
-        'scale_lr': 0.59,
+        'scale_step': 1.0375,  # 1.0375
+        'scale_lr': 0.59,  # 0.59
         'scale_penalty': 0.9745,
-        'window_influence': 0.176,
+        'window_influence': 0.176,  # 0.176
+        'hann_lr': 1.1,  # hanning_lr越小对结果影响越小
         'response_sz': 17,
         'response_up': 16,
         'total_stride': 8,
@@ -250,7 +254,7 @@ class TrackerSiamFC(Tracker):
         # 读取第一张图片
         first_frame_response_map = self.cal_first_frame_17_response_map(image)
         self.max_response_first_frame = first_frame_response_map.max()
-        print(self.max_response_first_frame)
+        # print(self.max_response_first_frame)
 
 
     # 计算第一帧的响应图,image是第一帧的图片
@@ -318,7 +322,7 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(0)
+        self.exemplar_image_seq.pop(8)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):
@@ -359,36 +363,13 @@ class TrackerSiamFC(Tracker):
                         l1_loss[i, 0, j, k] = loss_feat_regression
             return l1_loss
         l1_loss = l1_smooth_loss_feature_map(instance_feature, kernel)
-        response_map = binary_loss + l1_loss
+        # print("binary loss is {}, l1 loss is {}".format(binary_loss, l1_loss))
+        response_map = -1 * ((binary_loss + l1_loss).log())
+        # response_map = -1 * (binary_loss.log() + l1_loss.log())
         return response_map
 
-
-    # 当frame不等于第一帧时调用这个
-    def update(self, image):
-        img_to_show = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)  # 这个是为了用cv2显示用的,并不影响跟踪个结果
-        image = np.asarray(image)  # image 是PIL类型的图片
-
-        # search images
-        # 这里是裁剪3张不同尺度的图片用于和exampler卷积
-        instance_images = [self._crop_and_resize(
-            image, self.center, self.x_sz * f,
-            out_size=self.cfg.instance_sz,
-            pad_color=self.avg_color) for f in self.scale_factors]
-        instance_images = np.stack(instance_images, axis=0)
-        # 这里要做一个辨析，什么时候用permute 什么时候用view
-        instance_images = torch.from_numpy(instance_images).to(
-            self.device).permute([0, 3, 1, 2]).float()
-
-        # responses
-        with torch.set_grad_enabled(False):
-            self.net.eval()
-            instances = self.net.feature(instance_images)  # 生成instances的embedding
-            responses = -1 * self.calculate_response(instances, self.kernel).log()  # 因为这里计算的是loss,所以要求的是最小值
-            # responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
-        responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
-        # 提取当前响应图的最大值
-        max_response = responses.max()
-
+    # 对response进行一系列处理,返回处理后的map
+    def process_responsemap(self, responses, cv2img = None):
         # upsample responses and penalize scale changes
         # self.upscale_sz = 272 将响应图resize到272大小，中间使用三线性插值
         responses = np.stack([cv2.resize(
@@ -410,11 +391,42 @@ class TrackerSiamFC(Tracker):
         response -= response.min()  # 所有的值
         response /= response.sum() + 1e-16  # 归一化
         # self.cfg.window_influence = 0.176
-        response = (1 - self.cfg.window_influence) * response + \
-            self.cfg.window_influence * self.hann_window
+        response = (1 - self.cfg.window_influence) * response + self.cfg.window_influence * self.hann_window
+        return response, scale_id
+
+    # 当frame不等于第一帧时调用这个
+    def update(self, image):
+        global current_frame_id
+        current_frame_id += 1
+        img_to_show = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)  # 这个是为了用cv2显示用的,并不影响跟踪个结果
+        image = np.asarray(image)  # image 是PIL类型的图片
+
+        # search images
+        # 这里是裁剪3张不同尺度的图片用于和exampler卷积
+        instance_images = [self._crop_and_resize(
+            image, self.center, self.x_sz * f,
+            out_size=self.cfg.instance_sz,
+            pad_color=self.avg_color) for f in self.scale_factors]
+        instance_images = np.stack(instance_images, axis=0)
+        # 这里要做一个辨析，什么时候用permute 什么时候用view
+        instance_images = torch.from_numpy(instance_images).to(
+            self.device).permute([0, 3, 1, 2]).float()
+
+        # responses
+        with torch.set_grad_enabled(False):
+            self.net.eval()
+            instances = self.net.feature(instance_images)  # 生成instances的embedding
+            responses = self.calculate_response(instances, self.kernel)  # 因为这里计算的是loss,所以要求的是最小值
+            # responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
+        responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
+        # 提取当前响应图的最大值
+        response, scale_id = self.process_responsemap(responses)
+
+        # response = response * np.power(self.hann_window, self.cfg.hann_lr)
+        # response = np.log(response + 0.0000000001) + np.log(response * self.hann_window * self.cfg.hann_lr + 0.0000000001)
         # response.argmax() 是从response中返回最大值的的顺序位置
         # np.unravel_index 是从顺序位置中根据shape的形状返回下标
-        loc = np.unravel_index(response.argmax(), response.shape)
+        loc = np.unravel_index(response.argmax(), response.shape)  # loc是矩阵response中最大值所在的坐标
 
         # locate target center
         # self.upscale_sz = 272
@@ -432,25 +444,43 @@ class TrackerSiamFC(Tracker):
         # disp_in_image = 到原图的坐标中相对位移
         disp_in_image = disp_in_instance * self.x_sz * \
             self.scale_factors[scale_id] / self.cfg.instance_sz
+        def draw_response_as_heatmap_on_img():
+            # -----------------这里的self.center还保存着上一帧的目标中心位置
+            response_size = response.shape[0]  # 获取responsemap的大小
+            # -----------------response_origin_size表示response在原图中的大小
+            spie = self.cfg.instance_sz/(self.x_sz * self.scale_factors[scale_id])
+            response_origin_size = (response_size / self.cfg.response_up * self.cfg.total_stride / spie).astype(int)
+            #----------------将response从272缩放到原图大小
+            response_origin = cv2.resize(response, (response_origin_size, response_origin_size),
+                                         interpolation=cv2.INTER_CUBIC)
+            # 在当前图像中以上一帧目标中心为中心将responsemap画上去
+            tools.drawheatmap(img_to_show, response_origin, self.center)
+
+        draw_response_as_heatmap_on_img()
+
+
+        # -----------------下面更新了当前帧的坐标位置
+        # 这里center的格式为
+        # center[0]表示目标中心的纵坐标y轴,左上角以0为起点,类似于matrix的索引
+        # center[1]表示目标中心的横坐标x轴,左上角以0为起点,类似于matrix的索引
         self.center += disp_in_image  # self.center 更新当前帧的目标中心
 
+
         # update target size
-        scale =  (1 - self.cfg.scale_lr) * 1.0 + \
+        scale = (1 - self.cfg.scale_lr) * 1.0 + \
             self.cfg.scale_lr * self.scale_factors[scale_id]
         self.target_sz *= scale
         self.z_sz *= scale
         self.x_sz *= scale
 
         # return 1-indexed and left-top based bounding box
+        # 这里的box是xywh类型的数据
         box = np.array([
             self.center[1] + 1 - (self.target_sz[1] - 1) / 2,
             self.center[0] + 1 - (self.target_sz[0] - 1) / 2,
             self.target_sz[1], self.target_sz[0]])
 
-        ################# 更新self.kernel ####################
-        # 根据已跟踪到的box,求出这个box的
-        # if max_response < self.max_response_first_frame * self.para.update_template_threshold:
-        #     pass
+        #-------------------------更新self.kernel----------------------
         self.update_kernel(image, box)
 
         # showbb(img_to_show, box)
