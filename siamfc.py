@@ -13,6 +13,7 @@ from imageprocess import showimg,showbb
 from graphviz import Digraph
 from torch.autograd import Variable
 from make_dot import make_dot
+import matplotlib.pyplot as plt
 
 from got10k.trackers import Tracker
 import numpy as np
@@ -21,14 +22,33 @@ from parameters import param
 import imageprocess
 import tools
 
-current_frame_id = 1
+current_frame_id = 2
+if_draw_plot = False
+# 1=0.761   0.1 0.08 0.5 1.5 都比1小
+binary_loss_decay = 0.5  # binary与l1loss的平衡系数
+loss_type = 'two_loss'
+# loss_type = 'Binary_tune_by_l1'
+# loss_type = 'origin_tune_by_l1'  # 使用原版loss,并且使用l1loss约束
+# loss_type = 'binary_loss'
+# loss_type = 'original'
+# loss_type = 'l1_loss'
+# loss_type = 'l1hann_bin'
+# loss_type = 'mul_twoloss'
+# loss_type = 'exp_mul'
+current_sequence = 'temp'
+if_nor_before_loss = False
+show_pattern = 'heatmap'
+# show_pattern = 'bb'
+# show_pattern = None  # 什么都不打印
+origin_hann_wnd = True  # origion 的更好
+
 
 def parse_args(**kargs):
     # default parameters
     cfg = {
         # inference parameters
         'exemplar_sz': 127,
-        'instance_sz': 255,
+        'instance_sz': 255,  # 255 default
         'context': 0.5,
         'scale_num': 3,
         'scale_step': 1.0375,  # 1.0375
@@ -41,7 +61,7 @@ def parse_args(**kargs):
         'total_stride': 8,
         'adjust_scale': 0.001,  # 0.001 default
         # train parameters
-        'initial_lr': 0.01,  # 0.01 default
+        'initial_lr': 0.0001,  # 0.01 default
         'lr_decay': 0.8685113737513527,
         'weight_decay': 5e-4,
         'momentum': 0.9,
@@ -189,6 +209,11 @@ class TrackerSiamFC(Tracker):
 
         self.lr_scheduler = ExponentialLR(
             self.optimizer, gamma=self.cfg.lr_decay)
+
+        # ----------------- 用于画折线图
+        self.response_ave = []
+        self.response_max = []
+        self.frame_list = []
 
     # 当frame=0的时候调用次方法
     def init(self, image, box):
@@ -363,9 +388,53 @@ class TrackerSiamFC(Tracker):
                         l1_loss[i, 0, j, k] = loss_feat_regression
             return l1_loss
         l1_loss = l1_smooth_loss_feature_map(instance_feature, kernel)
+        # -------------------------进行一次归一化-------------------------
+        if if_nor_before_loss is True:
+            l1_loss = (l1_loss - l1_loss.min()) / l1_loss.sum() + 1e-16
+            binary_loss = (binary_loss - binary_loss.min()) / binary_loss.sum() + 1e-16
+
+        # print('Binary loss max is {}----l1 loss max is {}'.format(binary_loss.max(),l1_loss.max()))
         # print("binary loss is {}, l1 loss is {}".format(binary_loss, l1_loss))
-        response_map = -1 * ((binary_loss + l1_loss).log())
-        # response_map = -1 * (binary_loss.log() + l1_loss.log())
+        if loss_type is 'Binary_tune_by_l1': # 有问题
+        # 在binary的响应值比较大的区域累加L1
+            np_binary_loss = binary_loss.cpu().numpy()
+        #   找出最小的loss的50个点
+            max_point_index = np.unravel_index(np.argsort(np_binary_loss.ravel())[:20], np_binary_loss.shape)
+            np_l1_loss = l1_loss.cpu().numpy()
+            np_binary_loss[max_point_index] -= np_l1_loss[max_point_index]
+            print(np_binary_loss[max_point_index])
+            binary_loss_torch = torch.from_numpy(np_binary_loss).to(self.device)
+            response_map = -1 * binary_loss_torch.log()
+        if loss_type is 'original':
+            response_map = feature17_17
+        if loss_type is 'origin_tune_by_l1': # 没写完 有问题
+            max_point_index = np.unravel_index(np.argsort(feature17_17.ravel())[-20:], feature17_17.shape)
+            np_l1_loss = l1_loss.cpu().numpy()
+            feature17_17[max_point_index] -= np_l1_loss[max_point_index]
+            feature17_17_torch = torch.from_numpy(feature17_17).to(self.device)
+            response_map = feature17_17_torch
+        if loss_type is 'two_loss':
+            response_map = -1 * ((binary_loss*binary_loss_decay + l1_loss).log())
+        if loss_type is 'binary_loss':
+            response_map = -1 * binary_loss.log()
+        if loss_type is 'l1_loss':
+            response_map = -1 * l1_loss.log()
+        if loss_type is 'mul_twoloss':
+            response_map = 1 * (binary_loss.log() * l1_loss.log()).log()
+        if loss_type is 'exp_mul':  # not work
+            response_map = -1*(binary_loss.exp() + l1_loss.exp())
+        if loss_type is 'l1hann_bin':
+            temp_hann_window = np.outer(
+                np.hanning(17),
+                np.hanning(17))
+            temp_hann_window /= temp_hann_window.sum()
+            l1_loss_after_hann = l1_loss
+            l1_loss_after_hann = l1_loss_after_hann.cpu().numpy()
+            l1_loss_after_hann[0, 0, :, :] = l1_loss_after_hann[0, 0, :, :] * temp_hann_window
+            l1_loss_after_hann[1, 0, :, :] = l1_loss_after_hann[1, 0, :, :] * temp_hann_window
+            l1_loss_after_hann[2, 0, :, :] = l1_loss_after_hann[2, 0, :, :] * temp_hann_window
+            l1_loss_after_hann = torch.from_numpy(l1_loss_after_hann).to(self.device)
+            response_map = -1 * ((binary_loss + l1_loss_after_hann).log())
         return response_map
 
     # 对response进行一系列处理,返回处理后的map
@@ -387,12 +456,16 @@ class TrackerSiamFC(Tracker):
         scale_id = np.argmax(np.amax(responses, axis=(1, 2)))
 
         # peak location
+        response_before_normalize = responses[scale_id]  # 找出具有最大值的那一层响应 是一个17 17的响应图
         response = responses[scale_id]  # 找出具有最大值的那一层响应 是一个17 17的响应图
         response -= response.min()  # 所有的值
         response /= response.sum() + 1e-16  # 归一化
         # self.cfg.window_influence = 0.176
-        response = (1 - self.cfg.window_influence) * response + self.cfg.window_influence * self.hann_window
-        return response, scale_id
+        if origin_hann_wnd is True:
+            response = (1 - self.cfg.window_influence) * response + self.cfg.window_influence * self.hann_window
+        else:
+            response = response * self.hann_window
+        return response, scale_id, response_before_normalize
 
     # 当frame不等于第一帧时调用这个
     def update(self, image):
@@ -420,7 +493,7 @@ class TrackerSiamFC(Tracker):
             # responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
         responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
         # 提取当前响应图的最大值
-        response, scale_id = self.process_responsemap(responses)
+        response, scale_id, response_before_normalize = self.process_responsemap(responses)
 
         # response = response * np.power(self.hann_window, self.cfg.hann_lr)
         # response = np.log(response + 0.0000000001) + np.log(response * self.hann_window * self.cfg.hann_lr + 0.0000000001)
@@ -444,6 +517,7 @@ class TrackerSiamFC(Tracker):
         # disp_in_image = 到原图的坐标中相对位移
         disp_in_image = disp_in_instance * self.x_sz * \
             self.scale_factors[scale_id] / self.cfg.instance_sz
+        # ------------------以下用于作图分析的部分--------------------------------------------
         def draw_response_as_heatmap_on_img():
             # -----------------这里的self.center还保存着上一帧的目标中心位置
             response_size = response.shape[0]  # 获取responsemap的大小
@@ -456,8 +530,26 @@ class TrackerSiamFC(Tracker):
             # 在当前图像中以上一帧目标中心为中心将responsemap画上去
             tools.drawheatmap(img_to_show, response_origin, self.center)
 
-        draw_response_as_heatmap_on_img()
+        if show_pattern is 'heatmap':
+            draw_response_as_heatmap_on_img()
 
+        self.response_ave.append(np.average(response_before_normalize))
+        self.response_max.append(response_before_normalize.max())
+        self.frame_list.append(current_frame_id)
+        if if_draw_plot is True:
+            if current_frame_id % 50 is 0:
+                plt.figure()
+                plt.subplot(1, 2, 1)
+                plt.plot(self.frame_list, self.response_ave)
+                plt.xlabel('frame index')
+                plt.ylabel('average')
+
+                plt.subplot(1, 2, 2)
+                plt.plot(self.frame_list, self.response_max)
+                plt.xlabel('frame index')
+                plt.ylabel('response max')
+
+        # -----------------以上是用于作图分析的部分--------------------------------------------
 
         # -----------------下面更新了当前帧的坐标位置
         # 这里center的格式为
@@ -482,8 +574,8 @@ class TrackerSiamFC(Tracker):
 
         #-------------------------更新self.kernel----------------------
         self.update_kernel(image, box)
-
-        # showbb(img_to_show, box)
+        if show_pattern is 'bb':
+            showbb(img_to_show, box)
         return box
 
     def step(self, batch, backward=True, update_lr=False):
@@ -520,6 +612,7 @@ class TrackerSiamFC(Tracker):
 
             total_loss = self.para.class_weight*loss_cross_entropy + \
                          self.para.regression_loss_weight * loss_feat_regression
+            print('loss cross entropy is {}, regression_loss_weight is {}'.format(loss_cross_entropy, loss_feat_regression))
             # g = make_dot(total_loss)
             # g.view()
             if backward:

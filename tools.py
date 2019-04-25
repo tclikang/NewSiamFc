@@ -26,7 +26,7 @@ def drawheatmap(img, heatmap, center):
     # 在下面截断
     if half_hm_h + c_y > img_h:
         bottom_crop = ((half_hm_h + c_y) - img_h).astype(int)
-        heatmap = heatmap[:- bottom_crop, :]
+        heatmap = heatmap[:half_hm_h-bottom_crop, :]
     else: # 在下面padding
         bottom_padding = (img_h - (half_hm_h + c_y)).astype(int)
         heatmap = cv2.copyMakeBorder(heatmap, top=0, bottom=bottom_padding, left=0, right=0,
@@ -44,7 +44,7 @@ def drawheatmap(img, heatmap, center):
     # 在右面截断
     if half_hm_w + c_x > img_w:
         right_crop = ((half_hm_w + c_x) - img_w).astype(int)
-        heatmap = heatmap[:, :-right_crop]
+        heatmap = heatmap[:, :hm_w-right_crop]
     else:  # 在右面padding
         right_padding = (img_w - (half_hm_w + c_x)).astype(int)
         heatmap = cv2.copyMakeBorder(heatmap, top=0, bottom=0, left=0, right=right_padding,
