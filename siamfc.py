@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 from collections import namedtuple
 from torch.optim.lr_scheduler import ExponentialLR
-from imageprocess import showimg,showbb
+from imageprocess import showimg, showbb
 from graphviz import Digraph
 from torch.autograd import Variable
 from make_dot import make_dot
@@ -35,10 +35,11 @@ loss_type = 'two_loss'
 # loss_type = 'l1hann_bin'
 # loss_type = 'mul_twoloss'
 # loss_type = 'exp_mul'
-current_sequence = 'temp'
+current_sequence = 'OTB2013'
 if_nor_before_loss = False
-show_pattern = 'heatmap'
-# show_pattern = 'bb'
+update_kernel_flag = True
+# show_pattern = 'heatmap'
+show_pattern = 'bb'
 # show_pattern = None  # 什么都不打印
 origin_hann_wnd = True  # origion 的更好
 
@@ -347,7 +348,7 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(8)
+        self.exemplar_image_seq.pop(0)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):
@@ -573,7 +574,8 @@ class TrackerSiamFC(Tracker):
             self.target_sz[1], self.target_sz[0]])
 
         #-------------------------更新self.kernel----------------------
-        self.update_kernel(image, box)
+        if update_kernel_flag is True:
+            self.update_kernel(image, box)
         if show_pattern is 'bb':
             showbb(img_to_show, box)
         return box

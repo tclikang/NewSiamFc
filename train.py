@@ -67,5 +67,5 @@ if __name__ == '__main__':
 
                 # save checkpoint
             if step % 2000 == 0:
-                torch.save(tracker.net.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path,epoch,step))
+                torch.save(tracker.net.state_dict(), '{}E{:0>2d}S{:0>10}.pkl'.format(save_path, epoch, step))
 
