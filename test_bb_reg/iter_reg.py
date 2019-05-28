@@ -56,7 +56,7 @@ if __name__ == '__main__':
             x_loc_rao = x_loc_rao.numpy()[0]
             x_new_loc = x_loc_rao
             # 第12个epoch的效果是很好的
-            for i in range(2):
+            for i in range(3):
                 x_new_loc = test_utils.do_bbreg_according_to_network(model, z_img, z_loc, x_img, x_new_loc)
             # ------------------相关作图代码-------------------------------------
 

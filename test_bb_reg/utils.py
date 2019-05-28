@@ -30,6 +30,15 @@ def do_bbreg_according_to_network(model, z_img, z_loc, x_img, x_loc):
     x_img_crop = x_img_crop.unsqueeze(0).cuda()  # 转化成网络输入的格式
     # 进行 bbreg
     reg_score = model(z_img_crop, x_img_crop)  # 得到的是[8 4]的regression
+    # -----------------强行令w和h的比例相等,实验完成就删除-------------------------------
+    t1 = abs(reg_score[0, 2])
+    t2 = abs(reg_score[0, 3])
+    if t1 < t2:
+        temp = reg_score[0, 2]
+    else:
+        temp = reg_score[0, 3]
+    reg_score[0, 2] = reg_score[0, 3] = temp
+    # -----------------强行令w和h的比例相等-------------------------------
     reg_score = reg_score.cpu().numpy()[0]
     x_new_loc = bbt.bbreg_from_minmax_to_minmax(x_loc, reg_score)  # new_bb也是[8 4]的包围框
     return x_new_loc  # minmax类型的
@@ -42,7 +51,6 @@ def do_bbreg_according_to_network(model, z_img, z_loc, x_img, x_loc):
 def get_tx_ty_tw_th_from_two_anno(anno1, anno2):
     anno1_minmax = bbt.bb_from_xywh_topleft_to_minmax(anno1)
     anno2_minmax = bbt.bb_from_xywh_topleft_to_minmax(anno2)
-
     reg = bbt.get_tx_ty_tw_th_from_two_bb(anno1_minmax, anno2_minmax)
     return reg
 
@@ -56,6 +64,7 @@ def compute_iou_loss_from_two_tensor(bb1, bb2):
         loss = loss + (-torch.log(compute_iou(b1, b2) + 1e-16))
     loss = loss / bb1.shape[0]
     return loss
+
 
 # *****代码正确
 # 计算iou的函数
@@ -87,8 +96,9 @@ def compute_iou(box1, box2, wh=False):
     area1 = (xmax1 - xmin1) * (ymax1 - ymin1)
     area2 = (xmax2 - xmin2) * (ymax2 - ymin2)
 
-    inter_area = (torch.max(torch.tensor(0.), xx2 - xx1)) * (torch.max(torch.tensor(0.), yy2 - yy1))  # 计算交集面积
-    iou = inter_area / (area1 + area2 - inter_area + 1e-6)  # 计算交并比
+    inter_area = (torch.max(torch.tensor(0.).cuda(), xx2 - xx1)) * (
+        torch.max(torch.tensor(0.).cuda(), yy2 - yy1))  # 计算交集面积
+    iou = inter_area / (area1 + area2 - inter_area + 1e-16)  # 计算交并比
 
     return iou
 
@@ -161,5 +171,5 @@ if __name__ == '__main__':
     bb1 = torch.tensor([100, 50, 500, 300]).float()
     reg = torch.tensor([0.13105473343531948, -0.033663478107132244, -0.07829068051325883, 0.030208200061014656]).float()
 
-    print(bbreg_from_minmax_to_minmax(bb1,reg))
+    print(bbreg_from_minmax_to_minmax(bb1, reg))
     pass

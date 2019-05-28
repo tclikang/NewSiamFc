@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 
 from got10k.datasets import ImageNetVID, GOT10k
 from pairwise import Pairwise
-from siamfc import TrackerSiamFC
 from parameters import param
 
 # 讲最新的模型读入net,并删除老模型

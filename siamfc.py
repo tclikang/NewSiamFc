@@ -14,18 +14,23 @@ from graphviz import Digraph
 from torch.autograd import Variable
 from make_dot import make_dot
 import matplotlib.pyplot as plt
+import test_bb_reg.net_work
+import test_bb_reg.file_tools as tbr_f
+import test_bb_reg.utils as tbr_u
+import test_bb_reg.bb_tools as tbr_bbt
 
 from got10k.trackers import Tracker
 import numpy as np
-from imageprocess import showbb
+# from imageprocess import showbb
 from parameters import param
 import imageprocess
 import tools
+from test_bb_reg import net_work as reg_net
 
 current_frame_id = 2
 if_draw_plot = False
 # 1=0.761   0.1 0.08 0.5 1.5 都比1小
-binary_loss_decay = 0.5  # binary与l1loss的平衡系数
+binary_loss_decay = 1  # binary与l1loss的平衡系数
 loss_type = 'two_loss'
 # loss_type = 'Binary_tune_by_l1'
 # loss_type = 'origin_tune_by_l1'  # 使用原版loss,并且使用l1loss约束
@@ -39,9 +44,17 @@ current_sequence = 'OTB2013'
 if_nor_before_loss = False
 update_kernel_flag = True
 # show_pattern = 'heatmap'
-show_pattern = 'bb'
-# show_pattern = None  # 什么都不打印
+# show_pattern = 'bb'
+show_pattern = None  # 什么都不打印
 origin_hann_wnd = True  # origion 的更好
+# 回归次数
+reg_num = 3
+
+# 初始化回归网络
+reg_net = test_bb_reg.net_work.MyNet()
+reg_net = reg_net.to(reg_net.device)
+reg_net_model = '/home/fanfu/PycharmProjects/SimpleSiamFC/test_bb_reg/model_file/'
+_ = tbr_f.test_read_net(reg_net_model, reg_net)
 
 
 def parse_args(**kargs):
@@ -115,7 +128,6 @@ class SiamFC(nn.Module):
         self._initialize_weights()
         self.deconv = nn.Conv2d(256 * self.para.prior_frames_num, 256, 1, 1)  # 用于将堆叠后的特征对齐
 
-
     # seq_z是保存这13个用于帧序列的图像,是一个list,每个
     # 已经重新验证,无误
     def lk_forward(self, z_seq, x_target, x_search):
@@ -125,7 +137,7 @@ class SiamFC(nn.Module):
             if z_feat_cat is None:
                 z_feat_cat = z_feat
             else:
-                z_feat_cat = torch.cat((z_feat_cat,z_feat),1)
+                z_feat_cat = torch.cat((z_feat_cat, z_feat), 1)
 
         z_feat_deconv = self.deconv(z_feat_cat)  # 6 6 256
         x_target_feat = self.feature(x_target.to(self.device))  # 6  6  256
@@ -181,7 +193,7 @@ class SiamFC(nn.Module):
 
 class TrackerSiamFC(Tracker):
 
-    def __init__(self, net_path=None,**kargs):
+    def __init__(self, net_path=None, **kargs):
         super(TrackerSiamFC, self).__init__(
             name='SiamFC', is_deterministic=True)
         self.cfg = parse_args(**kargs)
@@ -192,6 +204,7 @@ class TrackerSiamFC(Tracker):
 
         # setup model
         self.net = SiamFC()
+
         # if net_path is not None:
         #     self.net.load_state_dict(torch.load(
         #     net_path, map_location=lambda storage, loc: storage))
@@ -204,7 +217,6 @@ class TrackerSiamFC(Tracker):
             weight_decay=self.cfg.weight_decay,  # self.cfg.weight_decay = 0.0005
             momentum=self.cfg.momentum)  # self.cfg.momentum = 0.9
 
-
         # setup lr scheduler
         # self.cfg.lr_decay = 0.8685113737513527
 
@@ -215,9 +227,16 @@ class TrackerSiamFC(Tracker):
         self.response_ave = []
         self.response_max = []
         self.frame_list = []
+        self.init_img = []
+        self.init_bb = []
 
     # 当frame=0的时候调用次方法
     def init(self, image, box):
+        # 将第一帧图片保存起来
+        self.init_img = image
+        self.init_bb = tbr_bbt.bb_from_xywh_topleft_to_minmax(box)
+        self.last_bb = box
+        # 将图片转换格式
         image = np.asarray(image)  # 将PIL图片转换成numpy
 
         # convert box to 0-indexed and center based [y, x, h, w]
@@ -254,7 +273,7 @@ class TrackerSiamFC(Tracker):
         context = self.cfg.context * np.sum(self.target_sz)
         self.z_sz = np.sqrt(np.prod(self.target_sz + context))
         self.x_sz = self.z_sz * \
-            self.cfg.instance_sz / self.cfg.exemplar_sz
+                    self.cfg.instance_sz / self.cfg.exemplar_sz
 
         # exemplar image
         # 将第一帧的目标范围裁剪出来
@@ -282,7 +301,6 @@ class TrackerSiamFC(Tracker):
         self.max_response_first_frame = first_frame_response_map.max()
         # print(self.max_response_first_frame)
 
-
     # 计算第一帧的响应图,image是第一帧的图片
     def cal_first_frame_17_response_map(self, image):
         # search images
@@ -300,11 +318,10 @@ class TrackerSiamFC(Tracker):
         with torch.set_grad_enabled(False):
             self.net.eval()
             instances = self.net.feature(instance_images)  # 生成instances的embedding
-            responses = F.conv2d(instances, self.kernel)*self.cfg.adjust_scale   # 生成卷积
+            responses = F.conv2d(instances, self.kernel) * self.cfg.adjust_scale  # 生成卷积
         responses = responses.squeeze(1).cpu().numpy()  # shape is [3 17 17]
 
         return responses.max()
-
 
     # z_seq是一个list,其中每一个里面都是一个可以卷积的
     def cal_z_seq_feat(self, z_seq):
@@ -348,24 +365,25 @@ class TrackerSiamFC(Tracker):
             self.device).permute([2, 0, 1]).unsqueeze(0).float()
         # 下面这种更新方式只用最近的13帧来搞
         self.exemplar_image_seq.append(exemplar_image)
-        self.exemplar_image_seq.pop(0)
+        self.exemplar_image_seq.pop(8)
         assert len(self.exemplar_image_seq) == self.para.prior_frames_num
 
         with torch.set_grad_enabled(False):
             self.net.eval()
             # self.kernel = self.net.feature(exemplar_image)
-            self.kernel = self.cal_z_seq_feat(self.exemplar_image_seq)*(1-self.para.kernel_lr) + \
-                          self.para.kernel_lr*self.last_kernel
+            self.kernel = self.cal_z_seq_feat(self.exemplar_image_seq) * (1 - self.para.kernel_lr) + \
+                          self.para.kernel_lr * self.last_kernel
             self.last_kernel = self.kernel
-
 
     # instance_feature size is [3 256 22 22] 包含三种尺度
     # kernel size is [1 256 6 6]
     def calculate_response(self, instance_feature, kernel):
         feature17_17 = F.conv2d(instance_feature, kernel) * self.cfg.adjust_scale  # 生成卷积
+
         def create_label():
             labels = torch.ones_like(feature17_17)
             return labels
+
         labels = create_label()
 
         def sigmoid(x):
@@ -373,9 +391,11 @@ class TrackerSiamFC(Tracker):
 
         def binary_cross_entropy(input, y):
             return -(input.log() * y + (1 - y) * (1 - input).log())
+
         sigmoid_feature_17_17 = sigmoid(feature17_17)
         binary_loss = binary_cross_entropy(sigmoid_feature_17_17, labels)
         l1_loss = torch.ones_like(binary_loss)
+
         # -----------------------create l1-smooth loss
         def l1_smooth_loss_feature_map(instance_feature, kernel):
             batch_size = instance_feature.shape[0]
@@ -384,10 +404,11 @@ class TrackerSiamFC(Tracker):
             for i in range(batch_size):
                 for j in range(feature_map_size - kernel_size + 1):
                     for k in range(feature_map_size - kernel_size + 1):
-                        temp = instance_feature[i, :, j:j+kernel_size, k:k+kernel_size]
+                        temp = instance_feature[i, :, j:j + kernel_size, k:k + kernel_size]
                         loss_feat_regression = F.smooth_l1_loss(kernel, temp)
                         l1_loss[i, 0, j, k] = loss_feat_regression
             return l1_loss
+
         l1_loss = l1_smooth_loss_feature_map(instance_feature, kernel)
         # -------------------------进行一次归一化-------------------------
         if if_nor_before_loss is True:
@@ -396,10 +417,10 @@ class TrackerSiamFC(Tracker):
 
         # print('Binary loss max is {}----l1 loss max is {}'.format(binary_loss.max(),l1_loss.max()))
         # print("binary loss is {}, l1 loss is {}".format(binary_loss, l1_loss))
-        if loss_type is 'Binary_tune_by_l1': # 有问题
-        # 在binary的响应值比较大的区域累加L1
+        if loss_type is 'Binary_tune_by_l1':  # 有问题
+            # 在binary的响应值比较大的区域累加L1
             np_binary_loss = binary_loss.cpu().numpy()
-        #   找出最小的loss的50个点
+            #   找出最小的loss的50个点
             max_point_index = np.unravel_index(np.argsort(np_binary_loss.ravel())[:20], np_binary_loss.shape)
             np_l1_loss = l1_loss.cpu().numpy()
             np_binary_loss[max_point_index] -= np_l1_loss[max_point_index]
@@ -408,14 +429,14 @@ class TrackerSiamFC(Tracker):
             response_map = -1 * binary_loss_torch.log()
         if loss_type is 'original':
             response_map = feature17_17
-        if loss_type is 'origin_tune_by_l1': # 没写完 有问题
+        if loss_type is 'origin_tune_by_l1':  # 没写完 有问题
             max_point_index = np.unravel_index(np.argsort(feature17_17.ravel())[-20:], feature17_17.shape)
             np_l1_loss = l1_loss.cpu().numpy()
             feature17_17[max_point_index] -= np_l1_loss[max_point_index]
             feature17_17_torch = torch.from_numpy(feature17_17).to(self.device)
             response_map = feature17_17_torch
         if loss_type is 'two_loss':
-            response_map = -1 * ((binary_loss*binary_loss_decay + l1_loss).log())
+            response_map = -1 * ((binary_loss * binary_loss_decay + l1_loss).log())
         if loss_type is 'binary_loss':
             response_map = -1 * binary_loss.log()
         if loss_type is 'l1_loss':
@@ -423,7 +444,7 @@ class TrackerSiamFC(Tracker):
         if loss_type is 'mul_twoloss':
             response_map = 1 * (binary_loss.log() * l1_loss.log()).log()
         if loss_type is 'exp_mul':  # not work
-            response_map = -1*(binary_loss.exp() + l1_loss.exp())
+            response_map = -1 * (binary_loss.exp() + l1_loss.exp())
         if loss_type is 'l1hann_bin':
             temp_hann_window = np.outer(
                 np.hanning(17),
@@ -439,7 +460,7 @@ class TrackerSiamFC(Tracker):
         return response_map
 
     # 对response进行一系列处理,返回处理后的map
-    def process_responsemap(self, responses, cv2img = None):
+    def process_responsemap(self, responses, cv2img=None):
         # upsample responses and penalize scale changes
         # self.upscale_sz = 272 将响应图resize到272大小，中间使用三线性插值
         responses = np.stack([cv2.resize(
@@ -472,7 +493,8 @@ class TrackerSiamFC(Tracker):
     def update(self, image):
         global current_frame_id
         current_frame_id += 1
-        img_to_show = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)  # 这个是为了用cv2显示用的,并不影响跟踪个结果
+        img_to_show = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)  # 这个是为了用cv2显示用的,并不影响跟踪个结果
+        PIL_img = image
         image = np.asarray(image)  # image 是PIL类型的图片
 
         # search images
@@ -511,21 +533,22 @@ class TrackerSiamFC(Tracker):
         # cfg.response_up = 16
         # disp_in_instance 这里是从映射到了原图的坐标
         disp_in_instance = disp_in_response * \
-            self.cfg.total_stride / self.cfg.response_up
+                           self.cfg.total_stride / self.cfg.response_up
         # self.cfg.instance_sz = 255
         # self.x_sz = 3338.177
         # self.scale_factors[scale_id]表示缩放的尺度
         # disp_in_image = 到原图的坐标中相对位移
         disp_in_image = disp_in_instance * self.x_sz * \
-            self.scale_factors[scale_id] / self.cfg.instance_sz
+                        self.scale_factors[scale_id] / self.cfg.instance_sz
+
         # ------------------以下用于作图分析的部分--------------------------------------------
         def draw_response_as_heatmap_on_img():
             # -----------------这里的self.center还保存着上一帧的目标中心位置
             response_size = response.shape[0]  # 获取responsemap的大小
             # -----------------response_origin_size表示response在原图中的大小
-            spie = self.cfg.instance_sz/(self.x_sz * self.scale_factors[scale_id])
+            spie = self.cfg.instance_sz / (self.x_sz * self.scale_factors[scale_id])
             response_origin_size = (response_size / self.cfg.response_up * self.cfg.total_stride / spie).astype(int)
-            #----------------将response从272缩放到原图大小
+            # ----------------将response从272缩放到原图大小
             response_origin = cv2.resize(response, (response_origin_size, response_origin_size),
                                          interpolation=cv2.INTER_CUBIC)
             # 在当前图像中以上一帧目标中心为中心将responsemap画上去
@@ -558,10 +581,9 @@ class TrackerSiamFC(Tracker):
         # center[1]表示目标中心的横坐标x轴,左上角以0为起点,类似于matrix的索引
         self.center += disp_in_image  # self.center 更新当前帧的目标中心
 
-
         # update target size
         scale = (1 - self.cfg.scale_lr) * 1.0 + \
-            self.cfg.scale_lr * self.scale_factors[scale_id]
+                self.cfg.scale_lr * self.scale_factors[scale_id]
         self.target_sz *= scale
         self.z_sz *= scale
         self.x_sz *= scale
@@ -572,8 +594,31 @@ class TrackerSiamFC(Tracker):
             self.center[1] + 1 - (self.target_sz[1] - 1) / 2,
             self.center[0] + 1 - (self.target_sz[0] - 1) / 2,
             self.target_sz[1], self.target_sz[0]])
+        # print(box)
+        # 下面的代码逻辑正确,但是不work
+        # 利用bb reg 更新 box ----------------------------------------------
+        # box = self.last_bb  # 测试只用bbreg能否跟踪成功 NO!
+        new_box = tbr_bbt.bb_from_xywh_topleft_to_minmax(box)  # minmax格式
+        with torch.no_grad():
+            for i in range(reg_num):  # 按理说不应该呀,原版回归的很好呀!!!!!
+                new_box = tbr_u.do_bbreg_according_to_network(reg_net, self.init_img,
+                                                          self.init_bb, PIL_img, new_box)  # minmax格式
+        new_box_center = tbr_bbt.bb_from_minmax_to_xywhcenter(new_box)  # center格式
+        # 更新center等
+        self.center = np.array([new_box_center[1], new_box_center[0]])  # y x 中心格式
+        self.target_sz = np.array([new_box_center[3], new_box_center[2]])  # h w 格式
 
-        #-------------------------更新self.kernel----------------------
+        # exemplar and search sizes
+        # 下面的z_sz和x_sz都是为没有乘以scale的情况下的大小，例如z_sz*scale=127
+        context = self.cfg.context * np.sum(self.target_sz)
+        self.z_sz = np.sqrt(np.prod(self.target_sz + context))
+        self.x_sz = self.z_sz * \
+                    self.cfg.instance_sz / self.cfg.exemplar_sz
+        # -------------------------将box弄成topleft的格式
+        box = tbr_bbt.bb_from_minmax_to_xywh_topleft(new_box)  # topleft格式
+        # print(box)
+        # self.last_bb = box  # 测试只用bb能够跟踪成功,NO!
+        # -------------------------更新self.kernel----------------------
         if update_kernel_flag is True:
             self.update_kernel(image, box)
         if show_pattern is 'bb':
@@ -612,9 +657,10 @@ class TrackerSiamFC(Tracker):
                 response17, labels, weight=weights, size_average=True)
             loss_feat_regression = F.smooth_l1_loss(z_deconv, x_target_feat)
 
-            total_loss = self.para.class_weight*loss_cross_entropy + \
+            total_loss = self.para.class_weight * loss_cross_entropy + \
                          self.para.regression_loss_weight * loss_feat_regression
-            print('loss cross entropy is {}, regression_loss_weight is {}'.format(loss_cross_entropy, loss_feat_regression))
+            print('loss cross entropy is {}, regression_loss_weight is {}'.format(loss_cross_entropy,
+                                                                                  loss_feat_regression))
             # g = make_dot(total_loss)
             # g.view()
             if backward:
@@ -700,3 +746,7 @@ class TrackerSiamFC(Tracker):
         self.weights = torch.from_numpy(weights).to(self.device).float()
 
         return self.labels, self.weights
+
+
+if __name__ == '__main__':
+    pass

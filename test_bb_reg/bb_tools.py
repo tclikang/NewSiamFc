@@ -25,7 +25,7 @@ def raodong_bb(anno, img_w, img_h, alpha=0.2, beta=0.3):
     ty = random.uniform(-alpha, alpha)
     tw = random.uniform(np.log(1 - beta), np.log(1 + beta))
     th = random.uniform(np.log(1 - beta), np.log(1 + beta))
-    print(tx, ty, tw, th)
+    # print(tx, ty, tw, th)
     xc_new = xc + tx * w
     yc_new = yc + ty * h
     w_new = w * np.exp(tw)

@@ -8,20 +8,25 @@ from parameters import param
 import torch
 from train import load_pre_train_mode
 import utils
+import test_bb_reg.net_work
+import test_bb_reg.file_tools as tbr_f
+import test_bb_reg.utils as tbr_u
 
 if __name__ == '__main__':
     # setup tracker
     # net_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
-    net_pretrain_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/siamfc_new'
+    net_pretrain_path = '/home/fanfu/PycharmProjects/SimpleSiamFC/pretrained/good_parameters/'
     para = param()
     tracker = TrackerSiamFC()
+
+
     # load net
     # load_pre_train_mode(tracker.net, net_pretrain_path)  # load pretrain model
     # loading my train model
-    if len(os.listdir(para.model_save_path)) > 0:  # 文件夹不为空
-        model_list = os.listdir(para.model_save_path)
+    if len(os.listdir(net_pretrain_path)) > 0:  # 文件夹不为空
+        model_list = os.listdir(net_pretrain_path)
         model_list.sort()
-        model_path = para.model_save_path + model_list[-1]
+        model_path = net_pretrain_path + model_list[-1]
         tracker.net.load_state_dict(torch.load(model_path))
 
 
